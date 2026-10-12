@@ -51,34 +51,42 @@ export function getUserProfile () {
 
     let username = user.username
 
-    if (username?.match(/#{(.*)}/) !== null && utils.isChallengeEnabled(challenges.usernameXssChallenge)) {
-      req.app.locals.abused_ssti_bug = true
-      const code = username?.substring(2, username.length - 1)
-      try {
-        if (!code) {
-          throw new Error('Username is null')
-        }
-        const singleQuoteRegex = /^'(?:[^'\\]|\\.)*'$/
-        const doubleQuoteRegex = /^"(?:[^"\\]|\\.)*"$/
-        const backtickRegex = /^`(?:[^`\\$]|\\.|\$(?!{))*`$/
-        const numericRegex = /^-?\d+(?:\.\d+)?$/
-        const booleanRegex = /^(?:true|false|null|undefined)$/
+    if (username?.match(/#{(.*)}/) !== null) {
+      if (utils.isChallengeEnabled(challenges.usernameXssChallenge)) {
+        req.app.locals.abused_ssti_bug = true
+        const code = username?.substring(2, username.length - 1)
+        try {
+          if (!code) {
+            throw new Error('Username is null')
+          }
+          const singleQuoteRegex = /^'(?:[^'\\\r\n]|\\.)*'$/
+          const doubleQuoteRegex = /^"(?:[^"\\\r\n]|\\.)*"$/
+          const backtickRegex = /^`(?:[^`\\$\r\n]|\\\.|\$(?!{))*`$/
+          const numericRegex = /^[0-9+\-*/%(). ]+$/
+          const booleanRegex = /^(?:true|false|null|undefined)$/
 
-        const isSafe = singleQuoteRegex.test(code) ||
-          doubleQuoteRegex.test(code) ||
-          backtickRegex.test(code) ||
-          numericRegex.test(code) ||
-          booleanRegex.test(code)
+          const isSafe = singleQuoteRegex.test(code) ||
+            doubleQuoteRegex.test(code) ||
+            backtickRegex.test(code) ||
+            numericRegex.test(code) ||
+            booleanRegex.test(code)
 
-        if (!isSafe) {
-          throw new Error('Unsafe code execution blocked')
+          if (!isSafe) {
+            throw new Error('Unsafe code execution blocked')
+          }
+          const evaluated = String(eval(code)) // eslint-disable-line no-eval
+          if (/[\r\n]/.test(evaluated) || /#\{|!\{/.test(evaluated)) {
+            throw new Error('Unsafe code execution blocked')
+          }
+          username = evaluated
+        } catch (err) {
+          username = '\\' + (user.username ?? '').replace(/[\r\n]/g, '')
         }
-        username = eval(code) // eslint-disable-line no-eval
-      } catch (err) {
-        username = '\\' + username
+      } else {
+        username = '\\' + (user.username ?? '').replace(/[\r\n]/g, '')
       }
-    } else {
-      username = '\\' + username
+    } else if (username) {
+      username = username.replace(/[\r\n]/g, '')
     }
 
     const themeKey = config.get<string>('application.theme') as keyof typeof themes
